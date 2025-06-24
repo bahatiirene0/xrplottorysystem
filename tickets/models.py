@@ -5,6 +5,7 @@ from datetime import datetime
 class TicketPurchaseRequest(BaseModel):
     wallet_address: str
     num_tickets: int
+    category_id: str = Field(..., description="The ID of the lottery category to buy tickets for")
 
 class TicketPurchaseResponse(BaseModel):
     success: bool
