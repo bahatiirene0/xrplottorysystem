@@ -136,18 +136,92 @@ def close_draw_endpoint(draw_id: str):
 
         update_payload: DrawUpdate
         if not participants:
-            update_payload = DrawUpdate(status='completed', winner=None, participants=[], actual_close_time=now)
-        else:
-            ledger_hash = get_latest_ledger_hash_sync()
-            winner_idx = calculate_winner_index(ledger_hash, len(participants))
-            winner_wallet = participants[winner_idx]
+            # No participants, so no winner, regardless of game type
             update_payload = DrawUpdate(
                 status='completed',
-                ledger_hash=ledger_hash,
-                winner=winner_wallet,
-                participants=participants,
+                winners_by_tier=[], # Empty list for winners
+                participants=[],
                 actual_close_time=now
             )
+        else:
+            # Participants exist, proceed based on game type
+            category = get_category_db_by_id(draw.category_id)
+            if not category:
+                raise HTTPException(status_code=500, detail=f"Category {draw.category_id} for draw {draw.id} not found during closing.")
+
+            ledger_hash = get_latest_ledger_hash_sync() # Used for both raffle and as seed for PickN
+
+            if category.game_type == "raffle":
+                winner_idx = calculate_winner_index(ledger_hash, len(participants))
+                # In a raffle, participants are wallet addresses. We need to find which ticket won.
+                # This is a simplification: a raffle usually picks one ticket ID, not one participant.
+                # For now, let's assume the participant IS the winner.
+                # A true raffle winner would require fetching all ticket IDs for the draw and picking one.
+                # Let's find one ticket_id for this winner for consistency with PrizeTierWinner model.
+                winning_participant_wallet = participants[winner_idx]
+
+                # Find a ticket associated with this winning participant for this draw
+                # This is not ideal for true raffle, but fits current structure.
+                winning_ticket_doc = ticket_collection.find_one(
+                    {"draw_id": draw.id, "wallet_address": winning_participant_wallet},
+                    {"_id": 1} # Get only the ticket ID
+                )
+                winning_ticket_id = str(winning_ticket_doc["_id"]) if winning_ticket_doc else "unknown_ticket"
+
+
+                update_payload = DrawUpdate(
+                    status='completed',
+                    ledger_hash=ledger_hash,
+                    winners_by_tier=[{ # PrizeTierWinner structure
+                        "prize_tier_name": "Raffle Winner",
+                        "wallet_address": winning_participant_wallet,
+                        "ticket_id": winning_ticket_id
+                    }],
+                    participants=participants,
+                    actual_close_time=now
+                )
+            elif category.game_type == "pick_n_digits":
+                # 1. Generate winning numbers (RNG function to be created in next step)
+                # Placeholder for now:
+                # winning_numbers = rng_utils.generate_winning_picks(ledger_hash, category.game_config)
+                # For testing, let's assume a fixed winning number generation if rng_utils is not ready
+                # This MUST be replaced by the actual RNG call.
+
+                # --- TEMPORARY Winning Number Generation ---
+                temp_num_picks = category.game_config.get("num_picks", 3)
+                winning_numbers_list = [int(d) for d in ledger_hash[:temp_num_picks] if d.isdigit()]
+                while len(winning_numbers_list) < temp_num_picks: # Ensure enough digits
+                    winning_numbers_list.append(0) # Pad with 0 if hash is too short
+                winning_numbers_list = winning_numbers_list[:temp_num_picks]
+                # --- END TEMPORARY ---
+
+                current_winning_selection = {"picks": winning_numbers_list} # Example structure
+
+                # 2. Find winning tickets (jackpot only for now)
+                found_winners_for_tier: List[dict] = [] # Using dict to build PrizeTierWinner
+
+                # Fetch all tickets for this draw that have selection_data
+                draw_tickets = ticket_collection.find({"draw_id": draw.id, "selection_data": {"$exists": True}})
+
+                for ticket_doc in draw_tickets:
+                    ticket_selection = ticket_doc.get("selection_data", {}).get("picks")
+                    if ticket_selection and list(ticket_selection) == winning_numbers_list: # Direct match for jackpot
+                        found_winners_for_tier.append({
+                            "prize_tier_name": f"Jackpot - Match {temp_num_picks}",
+                            "wallet_address": ticket_doc["wallet_address"],
+                            "ticket_id": str(ticket_doc["_id"])
+                        })
+
+                update_payload = DrawUpdate(
+                    status='completed',
+                    ledger_hash=ledger_hash, # Still useful as the seed
+                    winning_selection=current_winning_selection,
+                    winners_by_tier=found_winners_for_tier,
+                    participants=participants, # All who bought tickets, not just winners
+                    actual_close_time=now
+                )
+            else:
+                raise HTTPException(status_code=500, detail=f"Unsupported game_type '{category.game_type}' for closing draw.")
 
         success = draws_db.update_draw(draw.id, update_payload)
         if not success:

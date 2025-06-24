@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from tickets.router import router as tickets_router
 from draws.router import router as draws_router
 from lottery_categories.router import router as categories_router
-from winners.router import router as winners_router # Import the winners router
+from winners.router import router as winners_router
+from referrals.router import router as referrals_router # Import the referrals router
 from database import close_db_connection, connect_db, get_db
 
 app = FastAPI()
@@ -25,4 +26,5 @@ async def shutdown_db_client():
 app.include_router(tickets_router, prefix="/api/tickets", tags=["Tickets"])
 app.include_router(draws_router, prefix="/api/draws", tags=["Draws"])
 app.include_router(categories_router, prefix="/api/lottery_categories", tags=["Lottery Categories"])
-app.include_router(winners_router, prefix="/api/winners", tags=["Winners"]) # Add the winners router
+app.include_router(winners_router, prefix="/api/winners", tags=["Winners"])
+app.include_router(referrals_router, prefix="/api/referrals", tags=["Referrals"]) # Add the referrals router
