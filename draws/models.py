@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any # Added Dict, Any
 from datetime import datetime, timedelta
 
 # Represents a Draw document in MongoDB

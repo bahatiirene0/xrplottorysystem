@@ -48,12 +48,12 @@ def close_db_connection():
 # Connect on import - for FastAPI, dependency injection is better,
 # but for this structure, we'll connect and handle errors.
 # In a FastAPI app, you'd typically use startup/shutdown events.
-try:
-    connect_db()
-except Exception as e:
-    # Allow app to start, but log that DB is not available.
-    # Endpoints trying to use get_db() will fail until DB is up.
-    print(f"Failed to connect to database on initial load: {e}")
+# try:
+#     connect_db() # Removed auto-connect on import
+# except Exception as e:
+#     # Allow app to start, but log that DB is not available.
+#     # Endpoints trying to use get_db() will fail until DB is up.
+#     print(f"Failed to connect to database on initial load: {e}")
 
 # Example of how to get collections (optional here, can be done in modules)
 # def get_tickets_collection():

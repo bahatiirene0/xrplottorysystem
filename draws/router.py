@@ -5,8 +5,11 @@ from tickets.db import get_tickets_collection as get_ticket_db_collection
 from rng.utils import calculate_winner_index
 from datetime import datetime
 from xrpl.clients import JsonRpcClient
+# TODO: Find correct import for XRPLClientException for xrpl-py==2.4.0 and reinstate
+# from xrpl.clients import XRPLClientException # This was one attempt
+# from xrpl.exceptions import XRPLClientException # This was another
+# from xrpl import XRPLClientException # And another
 from xrpl.models.requests.ledger import Ledger
-from xrpl.clients.exceptions import XRPLClientException
 import os
 
 from . import db as draws_db
@@ -28,14 +31,17 @@ def get_latest_ledger_hash_sync():
         if not response.is_successful() or "ledger_hash" not in result:
             error_message = result.get("error_message") or result.get("error") or "Unknown XRPL error"
             print(f"XRPL request not successful or ledger_hash missing. Response: {result}")
-            raise XRPLClientException(f"Failed to get ledger_hash: {error_message}")
+            # TODO: Replace Exception with specific XRPLClientException once import is resolved
+            raise Exception(f"Failed to get ledger_hash: {error_message}")
         return result.get('ledger_hash')
-    except XRPLClientException as e:
-        print(f"XRPLClientException in get_latest_ledger_hash_sync: {e}")
-        raise
-    except Exception as e:
-        print(f"Generic Exception in get_latest_ledger_hash_sync: {e}")
-        raise XRPLClientException(f"An unexpected error occurred while fetching ledger hash: {e}")
+    # TODO: Reinstate specific XRPLClientException catch once import is resolved
+    # except XRPLClientException as e:
+    #     print(f"XRPLClientException in get_latest_ledger_hash_sync: {e}")
+    #     raise
+    except Exception as e: # Catching generic Exception for now
+        print(f"Exception in get_latest_ledger_hash_sync: {e}")
+        # TODO: Replace Exception with specific XRPLClientException once import is resolved
+        raise Exception(f"An unexpected error occurred while fetching ledger hash: {e}")
 
 
 # This endpoint is to manually trigger opening of due "pending_open" draws.
@@ -257,11 +263,12 @@ def close_draw_endpoint(draw_id: str):
 
         return closed_draw
 
-    except XRPLClientException as e:
-        raise HTTPException(status_code=502, detail=f"Error communicating with XRPL: {str(e)}")
-    except PyMongoError as e:
+    # TODO: Reinstate specific XRPLClientException catch once import is resolved
+    # except XRPLClientException as e:
+    #     raise HTTPException(status_code=502, detail=f"Error communicating with XRPL: {str(e)}")
+    except PyMongoError as e: # PyMongoError should be caught before generic Exception
         raise HTTPException(status_code=500, detail=f"Database error during draw closing: {str(e)}")
-    except HTTPException:
+    except HTTPException: # Re-raise other HTTPExceptions
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")

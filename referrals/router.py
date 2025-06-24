@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Body, Depends, Path, Query
 from typing import List, Optional
+from pydantic import BaseModel # Added import for BaseModel
 
 from . import db as referrals_db
 from .models import ReferralCode, ReferralLink, UserReferralStats, MyReferralCodeResponse
