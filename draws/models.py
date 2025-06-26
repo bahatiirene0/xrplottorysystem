@@ -26,6 +26,9 @@ class Draw(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # Prize pool for this specific draw instance
+    base_prize_pool: float = Field(default=0.0, ge=0, description="The base prize pool amount for this specific draw instance (category base + category rollover at time of creation).")
+
 
     class Config:
         populate_by_name = True
@@ -47,6 +50,7 @@ class DrawCreate(BaseModel):
     status: str = "pending_open" # Default status for a newly created scheduled draw
     scheduled_open_time: datetime
     scheduled_close_time: datetime
+    base_prize_pool: Optional[float] = Field(None, ge=0, description="Initial prize pool for this draw. If None, will be derived from category during creation.")
     # created_at and updated_at will be set in DB layer
 
     @classmethod
@@ -78,11 +82,16 @@ class DrawCreate(BaseModel):
         else:
             raise ValueError(f"Unsupported draw_interval_type: {category.draw_interval_type}")
 
+        # Calculate the initial prize pool for this draw instance
+        # It's the category's base pool plus any current rollover amount from the category.
+        initial_draw_prize_pool = category.base_prize_pool + category.current_rollover_amount
+
         return cls(
             category_id=category.id,
             scheduled_open_time=open_time,
             scheduled_close_time=close_time,
-            status="pending_open" # Draws are pending until their open time
+            status="pending_open", # Draws are pending until their open time
+            base_prize_pool=initial_draw_prize_pool
         )
 
 
@@ -100,11 +109,19 @@ class DrawUpdate(BaseModel):
 
 # Define PrizeTierWinner model here so Draw can reference it.
 class PrizeTierWinner(BaseModel):
-    prize_tier_name: str = Field(..., description="Name of the prize tier, e.g., 'Jackpot - Match 5', 'Tier 2 - Match 4'")
+    tier_name: str = Field(..., description="Name of the prize tier, matches PrizeTierConfig.tier_name from LotteryCategory")
     wallet_address: str = Field(..., description="Wallet address of the winner for this tier")
-    ticket_id: str = Field(..., description="The specific winning ticket ID") # Assuming one ticket per entry in this list
-    # prize_amount: Optional[float] = Field(None, description="Calculated prize amount for this winner for this tier") # Prize calculation can be complex
-    # selection_matched: Optional[Any] = Field(None, description="What part of their selection matched, if applicable")
+    ticket_id: str = Field(..., description="The specific winning ticket ID for this prize")
+
+    prize_amount_calculated: float = Field(..., ge=0, description="The gross prize amount calculated for this winner for this tier.")
+    is_fixed_prize: bool = Field(..., description="Indicates if this prize was a fixed amount or percentage-based.")
+
+    # Fields for fee calculation (added in step 5 of the plan)
+    fee_amount_charged: Optional[float] = Field(None, ge=0, description="The amount of fee charged on this winning.")
+    net_prize_payable: Optional[float] = Field(None, ge=0, description="The net prize amount payable to the winner after fees.")
+
+    # selection_matched: Optional[Any] = Field(None, description="What part of their selection matched, if applicable (e.g., for Pick N games)")
+
 
 # Need to update Draw's model_config if forward refs are used and not automatically handled by Pydantic v2
 # For Pydantic v2, forward references (like 'PrizeTierWinner' as a string) are typically handled automatically.

@@ -113,3 +113,30 @@ def delete_category(category_id: str) -> bool:
     except PyMongoError as e:
         print(f"Error deleting lottery category ID '{category_id}' from MongoDB: {e}")
         return False
+
+def update_category_rollover(category_id: str, new_rollover_amount: float) -> bool:
+    """
+    Updates only the current_rollover_amount for a specific lottery category.
+    """
+    try:
+        collection = get_categories_collection()
+        if not ObjectId.is_valid(category_id):
+            print(f"Invalid category_id format for rollover update: {category_id}")
+            return False
+
+        result: UpdateResult = collection.update_one(
+            {"_id": ObjectId(category_id)},
+            {
+                "$set": {
+                    "current_rollover_amount": new_rollover_amount,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    except PyMongoError as e:
+        print(f"Error updating rollover for category ID '{category_id}' in MongoDB: {e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error updating rollover for category ID '{category_id}': {e}")
+        return False
