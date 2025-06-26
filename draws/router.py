@@ -15,8 +15,12 @@ import logging # Added logging
 
 from . import db as draws_db
 from lottery_categories.db import get_category_by_id as get_category_db_by_id, update_category_rollover # Import added
-from lottery_categories.models import LotteryCategory, PrizeTierConfig # Added PrizeTierConfig
-from .models import PrizeTierWinner # Added PrizeTierWinner for type hinting
+from lottery_categories.models import LotteryCategory, PrizeTierConfig
+from .models import PrizeTierWinner
+from syndicates import db as syndicate_db
+from syndicates.models import Syndicate, SyndicateMemberStatus, MemberShare
+from gamification.services import gamification_service # Import gamification service
+from gamification.models import AchievementEventType # Import event types
 from pymongo.errors import PyMongoError
 
 router = APIRouter()
@@ -253,7 +257,50 @@ def close_draw_endpoint(draw_id: str):
                             "is_fixed_prize": is_fixed,
                             "fee_amount_charged": round((prize_amount_for_tier_winner * category.winner_fee_percentage / 100.0), 2),
                             "net_prize_payable": round(prize_amount_for_tier_winner * (1 - category.winner_fee_percentage / 100.0), 2)
-                        })
+                        }
+
+                        # --- Syndicate Winning Logic ---
+                        syndicate_purchase = syndicate_db.get_syndicate_purchase_for_ticket(
+                            ticket_id=selected_winner_ticket_info["ticket_id"],
+                            draw_id=draw.id
+                        )
+                        if syndicate_purchase:
+                            syndicate = syndicate_db.get_syndicate_by_id(syndicate_purchase.syndicate_id)
+                            if syndicate:
+                                active_members = [m for m in syndicate.members if m.status == SyndicateMemberStatus.ACTIVE]
+                                if active_members:
+                                    net_prize_for_distribution = winner_dict_for_payload["net_prize_payable"]
+                                    share_per_member = round(net_prize_for_distribution / len(active_members), 2)
+                                    member_shares: List[MemberShare] = []
+                                    for member_ac in active_members: # Renamed to avoid conflict
+                                        member_shares.append(MemberShare(
+                                            wallet_address=member_ac.wallet_address,
+                                            nickname=member_ac.nickname,
+                                            share_of_winnings=share_per_member
+                                        ))
+
+                                    total_distributed = sum(ms.share_of_winnings for ms in member_shares)
+                                    if member_shares and abs(total_distributed - net_prize_for_distribution) > 0.001:
+                                        member_shares[-1].share_of_winnings += (net_prize_for_distribution - total_distributed)
+                                        member_shares[-1].share_of_winnings = round(member_shares[-1].share_of_winnings, 2)
+
+                                    syndicate_db.record_syndicate_winnings(
+                                        syndicate_id=syndicate.id,
+                                        draw_id=draw.id,
+                                        winning_ticket_id=selected_winner_ticket_info["ticket_id"],
+                                        total_gross=winner_dict_for_payload["prize_amount_calculated"],
+                                        fee_charged=winner_dict_for_payload["fee_amount_charged"],
+                                        total_net=net_prize_for_distribution,
+                                        member_distributions=member_shares
+                                    )
+                                    logger.info(f"Syndicate {syndicate.id} won with ticket {selected_winner_ticket_info['ticket_id']}. Prize distributed among {len(active_members)} members.")
+                                    winner_dict_for_payload["syndicate_win_details"] = {
+                                        "syndicate_id": syndicate.id,
+                                        "syndicate_name": syndicate.name,
+                                        "distributed_to_members": len(active_members)
+                                    }
+                        # --- End Syndicate Winning Logic ---
+                        winners_for_final_payload.append(winner_dict_for_payload)
 
                     update_payload = DrawUpdate(
                         status='completed',
@@ -362,7 +409,52 @@ def close_draw_endpoint(draw_id: str):
                             "is_fixed_prize": is_fixed,
                             "fee_amount_charged": round((prize_amount_for_tier_winner * category.winner_fee_percentage / 100.0), 2),
                             "net_prize_payable": round(prize_amount_for_tier_winner * (1 - category.winner_fee_percentage / 100.0), 2)
-                        })
+                        }
+
+                        # --- Syndicate Winning Logic ---
+                        syndicate_purchase = syndicate_db.get_syndicate_purchase_for_ticket(
+                            ticket_id=winner_data["ticket_id"],
+                            draw_id=draw.id
+                        )
+                        if syndicate_purchase:
+                            syndicate = syndicate_db.get_syndicate_by_id(syndicate_purchase.syndicate_id)
+                            if syndicate:
+                                active_members = [m for m in syndicate.members if m.status == SyndicateMemberStatus.ACTIVE]
+                                if active_members:
+                                    net_prize_for_distribution = winner_dict_for_payload["net_prize_payable"]
+                                    share_per_member = round(net_prize_for_distribution / len(active_members), 2)
+                                    member_shares: List[MemberShare] = []
+                                    for member in active_members:
+                                        member_shares.append(MemberShare(
+                                            wallet_address=member.wallet_address,
+                                            nickname=member.nickname,
+                                            share_of_winnings=share_per_member
+                                        ))
+
+                                    # Adjust last member's share for any rounding differences
+                                    total_distributed = sum(ms.share_of_winnings for ms in member_shares)
+                                    if member_shares and abs(total_distributed - net_prize_for_distribution) > 0.001: # tolerance for float issues
+                                        member_shares[-1].share_of_winnings += (net_prize_for_distribution - total_distributed)
+                                        member_shares[-1].share_of_winnings = round(member_shares[-1].share_of_winnings, 2)
+
+                                    syndicate_db.record_syndicate_winnings(
+                                        syndicate_id=syndicate.id,
+                                        draw_id=draw.id,
+                                        winning_ticket_id=winner_data["ticket_id"],
+                                        total_gross=winner_dict_for_payload["prize_amount_calculated"],
+                                        fee_charged=winner_dict_for_payload["fee_amount_charged"],
+                                        total_net=net_prize_for_distribution,
+                                        member_distributions=member_shares
+                                    )
+                                    logger.info(f"Syndicate {syndicate.id} won with ticket {winner_data['ticket_id']}. Prize distributed among {len(active_members)} members.")
+                                    # Add a note to the main winner payload or handle as per display requirements
+                                    winner_dict_for_payload["syndicate_win_details"] = {
+                                        "syndicate_id": syndicate.id,
+                                        "syndicate_name": syndicate.name,
+                                        "distributed_to_members": len(active_members)
+                                    }
+                        # --- End Syndicate Winning Logic ---
+                        winners_for_final_payload.append(winner_dict_for_payload)
 
                 update_payload = DrawUpdate(
                     status='completed',
@@ -463,6 +555,27 @@ def close_draw_endpoint(draw_id: str):
                     logger.error(f"Failed to update rollover amount for category {category.id} to {new_rollover_amount}.")
                     # This is a non-critical error for the draw closing itself, but should be monitored.
         # --- End Progressive Jackpot Logic ---
+
+        # --- Gamification Event: Draw Win ---
+        if closed_draw and closed_draw.winners_by_tier:
+            for winner_info in closed_draw.winners_by_tier:
+                try:
+                    event_data_draw_win = {
+                        "prize_amount": winner_info.net_prize_payable or 0.0, # Use net payable
+                        "tier_name": winner_info.tier_name,
+                        "category_id": closed_draw.category_id,
+                        "draw_id": closed_draw.id
+                        # "is_syndicate_win": bool(winner_info.syndicate_win_details) # If needed
+                    }
+                    # Event is for the wallet address recorded as the winner of the tier
+                    gamification_service.process_event(
+                        user_wallet_address=winner_info.wallet_address,
+                        event_type=AchievementEventType.DRAW_WIN,
+                        event_data=event_data_draw_win
+                    )
+                except Exception as e_gami_win:
+                    logger.error(f"Error processing gamification event for draw win for wallet {winner_info.wallet_address}: {e_gami_win}")
+        # --- End Gamification Event ---
 
         return closed_draw
 

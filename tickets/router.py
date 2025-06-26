@@ -6,6 +6,8 @@ from draws.models import DrawCreate as DrawCreateSchema, DrawUpdate as DrawUpdat
 from lottery_categories.db import get_category_by_id as get_category_db_by_id
 from lottery_categories.models import LotteryCategory
 from referrals import db as referrals_db # Import referrals DB functions
+from gamification.services import gamification_service # Import gamification service
+from gamification.models import AchievementEventType # Import event types
 from datetime import datetime
 from typing import List, Optional, Any
 from pymongo.errors import PyMongoError
@@ -174,6 +176,25 @@ def buy_tickets(req: TicketPurchaseRequest):
     if not purchased_ticket_ids or len(purchased_ticket_ids) != req.num_tickets:
         raise HTTPException(status_code=500, detail="Could not purchase all requested tickets. Partial transaction may have occurred.")
 
+    # --- Gamification Event: Ticket Purchase ---
+    try:
+        # Assuming category is fetched and available
+        event_data_ticket_purchase = {
+            "count": len(purchased_ticket_ids),
+            "category_id": req.category_id,
+            # "total_value": category.ticket_price * len(purchased_ticket_ids) # If needed by an achievement
+        }
+        gamification_service.process_event(
+            user_wallet_address=req.wallet_address,
+            event_type=AchievementEventType.TICKET_PURCHASE,
+            event_data=event_data_ticket_purchase
+        )
+    except Exception as e_gami:
+        # Log gamification processing error but don't let it fail the main transaction
+        print(f"Error processing gamification event for ticket purchase: {e_gami}")
+    # --- End Gamification Event ---
+
+
     # After successful ticket purchase, if the user was newly referred, update their referral link status
     if is_newly_referred_user and applied_referral_code_owner: # Sanity check
         try:
@@ -182,6 +203,18 @@ def buy_tickets(req: TicketPurchaseRequest):
                 updated = referrals_db.update_referral_link_status(link_to_update.id, "eligible_for_reward")
                 if updated:
                     print(f"Referral link {link_to_update.id} for referee {req.wallet_address} (referred by {link_to_update.referrer_wallet_address}) status updated to 'eligible_for_reward'. Reward due to referrer.")
+
+                    # --- Gamification Event: Referral Success ---
+                    try:
+                        event_data_referral = {"count": 1} # For one successful referral
+                        gamification_service.process_event(
+                            user_wallet_address=link_to_update.referrer_wallet_address, # Event for the referrer
+                            event_type=AchievementEventType.REFERRAL_SUCCESS,
+                            event_data=event_data_referral
+                        )
+                    except Exception as e_gami_ref:
+                        print(f"Error processing gamification event for referral success: {e_gami_ref}")
+                    # --- End Gamification Event ---
                 else:
                     print(f"Failed to update referral link status for {link_to_update.id} after purchase.")
         except PyMongoError as e:

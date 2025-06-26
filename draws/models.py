@@ -120,6 +120,7 @@ class PrizeTierWinner(BaseModel):
     fee_amount_charged: Optional[float] = Field(None, ge=0, description="The amount of fee charged on this winning.")
     net_prize_payable: Optional[float] = Field(None, ge=0, description="The net prize amount payable to the winner after fees.")
 
+    syndicate_win_details: Optional[Dict[str, Any]] = Field(None, description="Details if this win was by a syndicate (e.g., syndicate_id, name, members_count)")
     # selection_matched: Optional[Any] = Field(None, description="What part of their selection matched, if applicable (e.g., for Pick N games)")
 
 
